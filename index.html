@@ -69,7 +69,7 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:9px;borde
 <button onclick="limparFiltro()">Hoje</button>
 </div>
 <div style="overflow:auto;margin-top:12px">
-<table><thead><tr><th>Data/hora</th><th>Tipo</th><th>Descrição</th><th>Pagamento</th><th>Valor</th></tr></thead>
+<table><thead><tr><th>Data/hora</th><th>Tipo</th><th>Descrição</th><th>Pagamento</th><th>Valor</th><th>Ações</th></tr></thead>
 <tbody id="movimentos"></tbody></table>
 </div>
 </section>
@@ -91,7 +91,7 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:9px;borde
 <button onclick="imprimir()">Imprimir fechamento</button>
 <input id="arquivo" type="file" accept=".json" style="display:none" onchange="restaurar(this)">
 </div>
-<p class="empty">Os dados ficam salvos neste navegador. Faça backups periódicos para não perder os registros se os dados do navegador forem apagados.</p>
+<p class="empty">Você pode apagar lançamentos individualmente pelo botão <b>Apagar</b> no histórico. Os dados ficam salvos neste navegador. Faça backups periódicos para não perder os registros se os dados do navegador forem apagados.</p>
 </section>
 </div>
 
@@ -106,7 +106,10 @@ let carrinho={};
 
 function salvar(){localStorage.setItem(CHAVE,JSON.stringify(db));}
 function dinheiro(v){return v.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});}
-function hoje(){return new Date().toISOString().slice(0,10);}
+function hoje(){
+ const d=new Date();
+ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
 
 function montarProdutos(){
@@ -141,9 +144,13 @@ function registrarSaida(){
  db.movimentos.push({id:Date.now(),date:new Date().toISOString(),tipo:'Saída',descricao:d,pagamento:'-',valor:v,itens:[]});
  salvar();document.getElementById('descSaida').value='';document.getElementById('valorSaida').value='';render();
 }
+function localDateFromISO(iso){
+ const d=new Date(iso);
+ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 function render(){
  const filtro=document.getElementById('dataFiltro').value||hoje();
- const mov=db.movimentos.filter(m=>m.date.slice(0,10)===filtro);
+ const mov=db.movimentos.filter(m=>localDateFromISO(m.date)===filtro);
  const vendas=mov.filter(m=>m.tipo==='Venda').reduce((s,m)=>s+m.valor,0);
  const saidas=mov.filter(m=>m.tipo==='Saída').reduce((s,m)=>s+m.valor,0);
  const itens=mov.filter(m=>m.tipo==='Venda').reduce((s,m)=>s+m.itens.reduce((a,x)=>a+x.qty,0),0);
@@ -152,12 +159,23 @@ function render(){
  document.getElementById('saldoHoje').textContent=dinheiro(vendas-saidas);
  document.getElementById('itensHoje').textContent=itens;
  const tbody=document.getElementById('movimentos');
- tbody.innerHTML=mov.length?mov.slice().reverse().map(m=>`<tr><td>${new Date(m.date).toLocaleString('pt-BR')}</td><td>${esc(m.tipo)}</td><td>${esc(m.descricao)}</td><td>${esc(m.pagamento)}</td><td>${dinheiro(m.valor)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">Nenhum movimento nesta data.</td></tr>';
+ tbody.innerHTML=mov.length?mov.slice().reverse().map(m=>`<tr><td>${new Date(m.date).toLocaleString('pt-BR')}</td><td>${esc(m.tipo)}</td><td>${esc(m.descricao)}</td><td>${esc(m.pagamento)}</td><td>${dinheiro(m.valor)}</td><td><button class="danger" style="padding:7px 10px" onclick="excluirMovimento(${m.id})">Apagar</button></td></tr>`).join(''):'<tr><td colspan="6" class="empty">Nenhum movimento nesta data.</td></tr>';
  const mapa={};
  db.movimentos.filter(m=>m.tipo==='Venda').forEach(m=>m.itens.forEach(x=>{if(!mapa[x.name])mapa[x.name]={q:0,v:0};mapa[x.name].q+=x.qty;mapa[x.name].v+=x.qty*x.unitPrice;}));
  const rank=Object.entries(mapa).sort((a,b)=>b[1].q-a[1].q);
  document.getElementById('ranking').innerHTML=rank.length?rank.map(([n,x])=>`<tr><td>${esc(n)}</td><td>${x.q}</td><td>${dinheiro(x.v)}</td></tr>`).join(''):'<tr><td colspan="3" class="empty">Ainda não há vendas.</td></tr>';
 }
+function excluirMovimento(id){
+  const movimento=db.movimentos.find(m=>m.id===id);
+  if(!movimento)return alert('Movimento não encontrado.');
+  const texto=`${movimento.tipo}: ${movimento.descricao} — ${dinheiro(movimento.valor)}`;
+  if(!confirm(`Tem certeza que deseja apagar este lançamento?\n\n${texto}\n\nEsta ação não poderá ser desfeita.`))return;
+  db.movimentos=db.movimentos.filter(m=>m.id!==id);
+  salvar();
+  render();
+  alert('Lançamento apagado com sucesso!');
+}
+
 function limparFiltro(){document.getElementById('dataFiltro').value=hoje();render();}
 function exportarCSV(){
  let rows=[['Data/hora','Tipo','Descrição','Pagamento','Valor']];
@@ -173,9 +191,10 @@ function restaurar(input){
 }
 function imprimir(){
  const filtro=document.getElementById('dataFiltro').value||hoje();
- const mov=db.movimentos.filter(m=>m.date.slice(0,10)===filtro);
+ const mov=db.movimentos.filter(m=>localDateFromISO(m.date)===filtro);
  const vendas=mov.filter(m=>m.tipo==='Venda').reduce((s,m)=>s+m.valor,0),saidas=mov.filter(m=>m.tipo==='Saída').reduce((s,m)=>s+m.valor,0);
- const w=window.open('','_blank');w.document.write(`<html><head><title>Fechamento ${filtro}</title></head><body style="font-family:Arial;padding:25px"><h2>LANCHONETE SHEKINHAH – CASA DO PÃO CASEIRO</h2><p>Fechamento: ${filtro}</p><hr><p>Vendas: <b>${dinheiro(vendas)}</b></p><p>Saídas: <b>${dinheiro(saidas)}</b></p><p>Saldo: <b>${dinheiro(vendas-saidas)}</b></p><p>Movimentos: ${mov.length}</p></body></html>`);w.document.close();w.print();
+ const totalDia=vendas-saidas;
+  const w=window.open('','_blank');w.document.write(`<html><head><title>Fechamento ${filtro}</title></head><body style="font-family:Arial;padding:25px"><h2>LANCHONETE SHEKINHAH – CASA DO PÃO CASEIRO</h2><p>Fechamento: ${filtro}</p><hr><p>Vendas do dia: <b>${dinheiro(vendas)}</b></p><p>Saídas do dia: <b>${dinheiro(saidas)}</b></p><p style="font-size:22px;margin-top:20px">TOTAL DO DIA: <b>${dinheiro(vendas)}</b></p><p style="font-size:22px">SALDO FINAL: <b>${dinheiro(totalDia)}</b></p><p>Movimentos: ${mov.length}</p></body></html>`);w.document.close();w.print();
 }
 document.getElementById('dataFiltro').value=hoje();montarProdutos();renderCarrinho();render();
 </script>
